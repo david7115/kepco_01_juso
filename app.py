@@ -2,13 +2,11 @@ import requests
 import streamlit as st
 from typing import List, Dict, Any, Optional
 
-st.set_page_config(page_title="한전 신·재생e 주소/지번 조회", page_icon="🔌", layout="centered")
+st.set_page_config(page_title="한전 신·재생e 주소/지번 조회", page_icon="🔌", layout="wide")
 
 BASE = "https://online.kepco.co.kr"
-URL_INIT = f"{BASE}/ew/cpct/retrieveAddrInit"   # (1) 시/도
-URL_DEV  = f"{BASE}/isDevSystem"                # (1-2) 환경 확인
-URL_SSO  = f"{BASE}/ssoCheck"                   # (1-3) SSO 체크
-URL_GBN  = f"{BASE}/ew/cpct/retrieveAddrGbn"    # (2~6) 단계별
+URL_INIT = f"{BASE}/ew/cpct/retrieveAddrInit"
+URL_GBN  = f"{BASE}/ew/cpct/retrieveAddrGbn"
 
 HEADERS = {
     "accept": "application/json",
@@ -19,12 +17,12 @@ HEADERS = {
 SBM_INIT = "mf_wfm_layout_sbm_retrieveAddrInit"
 SBM_GBN  = "mf_wfm_layout_sbm_retrieveAddrGbn"
 
-# gbn 매핑(제공자료 기준)
+# gbn
 GBN = dict(si=0, gu=1, lidong=2, li=3, jibun=4)
 
-# 응답 필드명
+# 응답 키
 RESP_KEY = dict(
-    sido_list="dlt_sido",   # retrieveAddrInit
+    sido_list="dlt_sido",
     si="ADDR_SI",
     gu="ADDR_GU",
     lidong="ADDR_LIDONG",
@@ -32,11 +30,21 @@ RESP_KEY = dict(
     jibun="ADDR_JIBUN",
 )
 
-# -------------------- 공통 유틸 --------------------
+# 플레이스홀더(스크린샷과 동일 문구)
+PH = {
+    "addr_do": "시/도 선택",
+    "addr_si": "시 선택",
+    "addr_gu": "구/군 선택",
+    "addr_lidong": "동/면 선택",
+    "addr_li": "리 선택",
+    "addr_jibun": "상세번지 선택",
+}
+
 def split_tokenize(s: str):
     buf = ""; out = []
     for ch in s:
-        if ch.isdigit(): buf += ch
+        if ch.isdigit():
+            buf += ch
         else:
             if buf: out.append(buf); buf = ""
             out.append(ch)
@@ -57,7 +65,6 @@ def extract_field(data: Dict[str, Any], field_key: str) -> List[str]:
     vals = [str(r.get(field_key)).strip() for r in rows if isinstance(r, dict) and r.get(field_key)]
     return nat_sort_uniq(vals)
 
-# -------------------- API 클라이언트 --------------------
 class KepcoClient:
     def __init__(self, timeout: int = 20):
         self.sess = requests.Session()
@@ -70,198 +77,139 @@ class KepcoClient:
         r.raise_for_status()
         return r.json()
 
-    def _get(self, url: str) -> Dict[str, Any]:
-        r = self.sess.get(url, headers={"accept": "application/json"}, timeout=self.timeout)
-        r.raise_for_status()
-        try: return r.json()
-        except Exception: return {"_text": r.text}
-
-    # (1) 시/도
     def retrieve_addr_init(self) -> Dict[str, Any]:
         return self._post(URL_INIT, {}, submissionid=SBM_INIT)
 
-    # (옵션) 환경/SSO
-    def is_dev_system(self) -> Dict[str, Any]:
-        return self._get(URL_DEV)
-
-    def sso_check(self) -> Dict[str, Any]:
-        body = {"userId": "", "userMngSeqno": "0", "name": "", "autoLogin": "Y"}
-        return self._post(URL_SSO, body)
-
-    # (2~6) 단계별
     def retrieve_addr_gbn(
-        self,
-        gbn: int,
-        addr_do: str = "",
-        addr_si: str = "",
-        addr_gu: str = "",
-        addr_lidong: str = "",
-        addr_li: str = "",
-        addr_jibun: str = "",
+        self, gbn: int, addr_do: str = "", addr_si: str = "", addr_gu: str = "",
+        addr_lidong: str = "", addr_li: str = "", addr_jibun: str = ""
     ) -> Dict[str, Any]:
-        body = {
-            "dma_addrGbn": {
-                "gbn": gbn,
+        body = {"dma_addrGbn": {
+            "gbn": gbn, "addr_do": addr_do, "addr_si": addr_si, "addr_gu": addr_gu,
+            "addr_lidong": addr_lidong, "addr_li": addr_li, "addr_jibun": addr_jibun
+        }}
+        return self._post(URL_GBN, body, submissionid=SBM_GBN)
+
+# ---- cache wrappers
+@st.cache_data(show_spinner=False)
+def get_sido_options() -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_init()
+    return extract_sido(res)
+
+@st.cache_data(show_spinner=False)
+def get_si_options(addr_do: str) -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_gbn(GBN["si"], addr_do=addr_do)
+    return extract_field(res, RESP_KEY["si"])
+
+@st.cache_data(show_spinner=False)
+def get_gu_options(addr_do: str, addr_si: str) -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_gbn(GBN["gu"], addr_do=addr_do, addr_si=addr_si)
+    return extract_field(res, RESP_KEY["gu"])
+
+@st.cache_data(show_spinner=False)
+def get_lidong_options(addr_do: str, addr_si: str, addr_gu: str) -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_gbn(GBN["lidong"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu)
+    return extract_field(res, RESP_KEY["lidong"])
+
+@st.cache_data(show_spinner=False)
+def get_li_options(addr_do: str, addr_si: str, addr_gu: str, addr_lidong: str) -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_gbn(GBN["li"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu, addr_lidong=addr_lidong)
+    return extract_field(res, RESP_KEY["li"])
+
+@st.cache_data(show_spinner=False)
+def get_jibun_options(addr_do: str, addr_si: str, addr_gu: str, addr_lidong: str, addr_li: str) -> List[str]:
+    cli = KepcoClient()
+    res = cli.retrieve_addr_gbn(GBN["jibun"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu,
+                                addr_lidong=addr_lidong, addr_li=addr_li, addr_jibun="")
+    return extract_field(res, RESP_KEY["jibun"])
+
+def reset_below(level: str):
+    order = ["addr_do","addr_si","addr_gu","addr_lidong","addr_li","addr_jibun"]
+    for k in order[order.index(level)+1:]:
+        st.session_state.pop(k, None)
+
+# ---- UI
+def main():
+    st.markdown("## 주소로 검색")
+
+    # 1) 시/도
+    sido = get_sido_options()
+    do_options = [PH["addr_do"]] + sido
+    addr_do = st.selectbox("시/도", do_options, index=0, key="addr_do",
+                           on_change=reset_below, args=("addr_do",))
+    st.write("")  # spacing
+
+    # 2) 시
+    si_options = [PH["addr_si"]]
+    if addr_do and addr_do != PH["addr_do"]:
+        si_options += get_si_options(addr_do)
+    addr_si = st.selectbox("시", si_options, index=0, key="addr_si",
+                           disabled=(addr_do == PH["addr_do"]),
+                           on_change=reset_below, args=("addr_si",))
+
+    # 3) 구/군
+    gu_options = [PH["addr_gu"]]
+    if addr_si and addr_si != PH["addr_si"]:
+        gu_options += get_gu_options(addr_do, addr_si)
+    addr_gu = st.selectbox("구/군", gu_options, index=0, key="addr_gu",
+                           disabled=(addr_si == PH["addr_si"]),
+                           on_change=reset_below, args=("addr_gu",))
+
+    # 4) 동/면
+    lidong_options = [PH["addr_lidong"]]
+    if addr_gu and addr_gu != PH["addr_gu"]:
+        lidong_options += get_lidong_options(addr_do, addr_si, addr_gu)
+    addr_lidong = st.selectbox("동/면", lidong_options, index=0, key="addr_lidong",
+                               disabled=(addr_gu == PH["addr_gu"]),
+                               on_change=reset_below, args=("addr_lidong",))
+
+    # 5) 리
+    li_options = [PH["addr_li"]]
+    if addr_lidong and addr_lidong != PH["addr_lidong"]:
+        li_options += get_li_options(addr_do, addr_si, addr_gu, addr_lidong)
+    addr_li = st.selectbox("리", li_options, index=0, key="addr_li",
+                           disabled=(addr_lidong == PH["addr_lidong"]),
+                           on_change=reset_below, args=("addr_li",))
+
+    # 6) 상세번지(지번)
+    jibun_options = [PH["addr_jibun"]]
+    if addr_li and addr_li != PH["addr_li"]:
+        jibun_options += get_jibun_options(addr_do, addr_si, addr_gu, addr_lidong, addr_li)
+    addr_jibun = st.selectbox("상세번지", jibun_options, index=0, key="addr_jibun",
+                              disabled=(addr_li == PH["addr_li"]))
+
+    st.write("")  # spacing
+    c1, c2 = st.columns([1,1])
+    with c1:
+        if st.button("초기화"):
+            for k in ["addr_do","addr_si","addr_gu","addr_lidong","addr_li","addr_jibun"]:
+                st.session_state.pop(k, None)
+            st.experimental_rerun()
+    with c2:
+        # 검색 버튼: 플레이스홀더가 하나라도 남아있으면 비활성화
+        ready = all([
+            addr_do != PH["addr_do"],
+            addr_si != PH["addr_si"],
+            addr_gu != PH["addr_gu"],
+            addr_lidong != PH["addr_lidong"],
+            addr_li != PH["addr_li"],
+            addr_jibun != PH["addr_jibun"],
+        ])
+        if st.button("검색", disabled=not ready):
+            st.success("선택 완료")
+            st.json({
                 "addr_do": addr_do,
                 "addr_si": addr_si,
                 "addr_gu": addr_gu,
                 "addr_lidong": addr_lidong,
                 "addr_li": addr_li,
-                "addr_jibun": addr_jibun,
-            }
-        }
-        return self._post(URL_GBN, body, submissionid=SBM_GBN)
-
-# -------------------- 캐시 래퍼 --------------------
-@st.cache_data(show_spinner=False)
-def get_sido_list() -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    # 초기 handshake (필요시 주석 해제)
-    # client.is_dev_system()
-    # client.sso_check()
-    res = client.retrieve_addr_init()
-    return extract_sido(res), res
-
-@st.cache_data(show_spinner=False)
-def get_si_list(addr_do: str) -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    res = client.retrieve_addr_gbn(GBN["si"], addr_do=addr_do)
-    return extract_field(res, RESP_KEY["si"]), res
-
-@st.cache_data(show_spinner=False)
-def get_gu_list(addr_do: str, addr_si: str) -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    res = client.retrieve_addr_gbn(GBN["gu"], addr_do=addr_do, addr_si=addr_si)
-    return extract_field(res, RESP_KEY["gu"]), res
-
-@st.cache_data(show_spinner=False)
-def get_lidong_list(addr_do: str, addr_si: str, addr_gu: str) -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    res = client.retrieve_addr_gbn(GBN["lidong"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu)
-    return extract_field(res, RESP_KEY["lidong"]), res
-
-@st.cache_data(show_spinner=False)
-def get_li_list(addr_do: str, addr_si: str, addr_gu: str, addr_lidong: str) -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    res = client.retrieve_addr_gbn(GBN["li"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu, addr_lidong=addr_lidong)
-    return extract_field(res, RESP_KEY["li"]), res
-
-@st.cache_data(show_spinner=False)
-def get_jibun_list(addr_do: str, addr_si: str, addr_gu: str, addr_lidong: str, addr_li: str) -> (List[str], Dict[str, Any]):
-    client = KepcoClient()
-    res = client.retrieve_addr_gbn(GBN["jibun"], addr_do=addr_do, addr_si=addr_si, addr_gu=addr_gu,
-                                   addr_lidong=addr_lidong, addr_li=addr_li, addr_jibun="")
-    return extract_field(res, RESP_KEY["jibun"]), res
-
-# -------------------- 상태 초기화(상위 변경 시 하위 리셋) --------------------
-def reset_below(level: str):
-    chain = ["addr_do", "addr_si", "addr_gu", "addr_lidong", "addr_li", "addr_jibun"]
-    idx = chain.index(level)
-    for key in chain[idx+1:]:
-        st.session_state.pop(key, None)
-
-# -------------------- UI --------------------
-def main():
-    st.title("🔌 한전 신·재생e 주소/지번 조회")
-    st.caption("응답 미리보기의 값이 다음 단계 셀렉트박스 옵션으로 즉시 반영됩니다.")
-
-    # 1) 시/도
-    with st.spinner("시/도 목록 로딩…"):
-        sido_options, sido_raw = get_sido_list()
-    if not sido_options:
-        st.error("시/도 목록을 불러오지 못했습니다.")
-        return
-
-    st.subheader("주소 선택")
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.markdown("**시/도(addr_do)**")
-        addr_do = st.selectbox(
-            "시/도",
-            options=sido_options,
-            index=sido_options.index("강원특별자치도") if "강원특별자치도" in sido_options else 0,
-            key="addr_do",
-            on_change=reset_below, args=("addr_do",)
-        )
-    with c2:
-        with st.expander("시/도 응답 미리보기"):
-            st.json(sido_raw)
-
-    # 2) 시
-    with st.spinner("시 목록 로딩…"):
-        si_options, si_raw = get_si_list(addr_do)
-    addr_si = st.selectbox(
-        "시(addr_si)",
-        options=si_options,
-        index=si_options.index("강릉시") if "강릉시" in si_options else 0,
-        key="addr_si",
-        on_change=reset_below, args=("addr_si",)
-    )
-    with st.expander("시 응답 미리보기"):
-        st.json(si_raw)
-
-    # 3) 구/군
-    with st.spinner("구/군 목록 로딩…"):
-        gu_options, gu_raw = get_gu_list(addr_do, addr_si)
-    addr_gu = st.selectbox(
-        "구/군(addr_gu)",
-        options=gu_options,
-        index=gu_options.index("-기타지역") if "-기타지역" in gu_options else (0 if gu_options else 0),
-        key="addr_gu",
-        on_change=reset_below, args=("addr_gu",)
-    )
-    with st.expander("구/군 응답 미리보기"):
-        st.json(gu_raw)
-
-    # 4) 동/면
-    with st.spinner("동/면 목록 로딩…"):
-        lidong_options, lidong_raw = get_lidong_list(addr_do, addr_si, addr_gu)
-    addr_lidong = st.selectbox(
-        "동/면(addr_lidong)",
-        options=lidong_options,
-        index=lidong_options.index("강동면") if "강동면" in lidong_options else (0 if lidong_options else 0),
-        key="addr_lidong",
-        on_change=reset_below, args=("addr_lidong",)
-    )
-    with st.expander("동/면 응답 미리보기"):
-        st.json(lidong_raw)
-
-    # 5) 리
-    with st.spinner("리 목록 로딩…"):
-        li_options, li_raw = get_li_list(addr_do, addr_si, addr_gu, addr_lidong)
-    addr_li = st.selectbox(
-        "리(addr_li)",
-        options=li_options,
-        index=li_options.index("모전리") if "모전리" in li_options else (0 if li_options else 0),
-        key="addr_li",
-        on_change=reset_below, args=("addr_li",)
-    )
-    with st.expander("리 응답 미리보기"):
-        st.json(li_raw)
-
-    # 6) 상세번지(지번)
-    with st.spinner("상세번지(지번) 목록 로딩…"):
-        jibun_options, jibun_raw = get_jibun_list(addr_do, addr_si, addr_gu, addr_lidong, addr_li)
-    addr_jibun = st.selectbox(
-        "상세번지(addr_jibun)",
-        options=jibun_options,
-        index=0 if jibun_options else 0,
-        key="addr_jibun"
-    )
-    with st.expander("상세번지 응답 미리보기"):
-        st.json(jibun_raw)
-
-    st.divider()
-    st.markdown("### 최종 선택값")
-    st.json({
-        "addr_do": addr_do,
-        "addr_si": addr_si,
-        "addr_gu": addr_gu,
-        "addr_lidong": addr_lidong,
-        "addr_li": addr_li,
-        "addr_jibun": addr_jibun
-    })
+                "addr_jibun": addr_jibun
+            })
 
 if __name__ == "__main__":
     main()
