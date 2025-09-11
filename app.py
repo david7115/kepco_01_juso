@@ -104,11 +104,11 @@ ESB_API_URL = os.environ.get("KEPCO_ESB_SEARCH_URL", "").strip()  # 예: https:/
 # -------------------------------------------------
 # 자연 정렬(혼합 토큰 안전)
 # -------------------------------------------------
-def split_tokenize(s: str) -> List[str]:
-    s = "" if s is None else str(s)
+def split_tokenize(s: str):
+    """문자열을 숫자/문자 토큰으로 분리"""
     buf = ""
-    out: List[str] = []
-    for ch in s:
+    out = []
+    for ch in str(s):
         if ch.isdigit():
             buf += ch
         else:
@@ -121,14 +121,23 @@ def split_tokenize(s: str) -> List[str]:
     return out
 
 def nat_sort_uniq(items: List[str]) -> List[str]:
+    """
+    자연스러운 정렬 + 중복 제거.
+    숫자 토큰은 (0, int), 문자 토큰은 (1, str) 형태의 키로 변환하여
+    int vs str 비교 오류를 제거.
+    """
     def nat_key(x: str):
         key = []
         for t in split_tokenize(x):
-            if t.isdigit(): key.append((0, int(t)))
-            else: key.append((1, t))
+            if t.isdigit():
+                key.append((0, int(t)))
+            else:
+                key.append((1, t))
         return tuple(key)
-    cleaned = [str(x).strip() for x in items if x is not None and str(x).strip() != ""]
-    return sorted(set(cleaned), key=nat_key)
+
+    items = [x for x in items if x is not None and str(x).strip() != ""]
+    return sorted(set(items), key=nat_key)
+
 
 # -------------------------------------------------
 # 응답 파서
@@ -305,7 +314,7 @@ def tab_address():
         addr_li = st.selectbox("리", li_options, index=0, key="addr_li",
                                disabled=(addr_lidong == PH["addr_lidong"]),
                                on_change=reset_below, args=("addr_li",))
-
+        
         # 6) 상세번지(지번)
         jibun_options = [PH["addr_jibun"]]
         if addr_li and addr_li != PH["addr_li"]:
