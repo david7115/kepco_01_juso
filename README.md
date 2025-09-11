@@ -1,6 +1,6 @@
 # KEPCO 신·재생e 주소/지번 조회 (Streamlit)
 
-실제 네트워크 캡처를 반영한 주소검색 프로세스:
+## 실제 네트워크 캡처를 반영한 주소검색 프로세스:
 1) `POST /ew/cpct/retrieveAddrInit` (페이로드 없음) → **시/도**: `dlt_sido[*].ADDR_DO`
 2) `GET /isDevSystem` → 환경확인
 3) `POST /ssoCheck` ({"userId":"","userMngSeqno":"0","name":"","autoLogin":"Y"}) → 로그인 체크
@@ -10,6 +10,44 @@
    - **읍/면/동**: `gbn=2` (addr_do, addr_si, addr_gu) → `ADDR_LIDONG`
    - **리**: `gbn=3` (addr_do, addr_si, addr_gu, addr_lidong) → `ADDR_LI`
    - **지번**: `gbn=4` (… + addr_li, `addr_jibun:""`) → `ADDR_JIBUN`  ← **한전이 등록한 특정 지번**
+
+
+## "리" 오류로 세부번지 검색 불가 오류 수정
+def split_tokenize(s: str):
+    """문자열을 숫자/문자 토큰으로 분리"""
+    buf = ""
+    out = []
+    for ch in str(s):
+        if ch.isdigit():
+            buf += ch
+        else:
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.append(ch)
+    if buf:
+        out.append(buf)
+    return out
+
+def nat_sort_uniq(items: List[str]) -> List[str]:
+    """
+    자연스러운 정렬 + 중복 제거.
+    숫자 토큰은 (0, int), 문자 토큰은 (1, str) 형태의 키로 변환하여
+    int vs str 비교 오류를 제거.
+    """
+    def nat_key(x: str):
+        key = []
+        for t in split_tokenize(x):
+            if t.isdigit():
+                key.append((0, int(t)))
+            else:
+                key.append((1, t))
+        return tuple(key)
+
+    items = [x for x in items if x is not None and str(x).strip() != ""]
+    return sorted(set(items), key=nat_key)
+참고: extract_field(...)에서 이미 str(r.get(...))로 캐스팅하고 있지만,
+서버가 하이픈(-), 한글+숫자("산117", "11-4") 등을 섞어서 주면 위와 같은 타입 혼합 문제가 생길 수 있어 위처럼 키 정규화를 해야 합니다.
 
 ## 실행
 ```bash
